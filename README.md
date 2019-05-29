@@ -15,9 +15,9 @@
 ```
 
 ## <a name="pkg-overview">Overview</a>
-Package peercred provides Listener - a net.Listener implementation leveraging
-the Linux SO_PEERCRED socket option to acquire the PID, UID, and GID of the
-foreign process connected to each socket. According to the socket(7) manual,
+Package peercred provides a net.Listener implementation leveraging the Linux
+SO_PEERCRED socket option to acquire the PID, UID, and GID of the foreign
+process connected to each socket. According to the socket(7) manual,
 
     This is possible only for connected AF_UNIX stream
     sockets and AF_UNIX stream and datagram socket pairs
@@ -35,7 +35,7 @@ subordinate package toolman.org/net/peercred/grpcpeer.
 A simple, unix-domain server can be written similar to the following:
 
 	// Create a new Listener listening on socketName
-	lsnr, err := peercred.NewListener(ctx, socketName)
+	lsnr, err := peercred.Listen(ctx, socketName)
 	if err != nil {
 	    return err
 	}
