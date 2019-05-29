@@ -139,6 +139,6 @@ cannot be extracted, AcceptPeerCred returns nil and an error.
 [reportcard-img]: https://goreportcard.com/badge/toolman.org/net/peercred
 [reportcard]: https://goreportcard.com/report/toolman.org/net/peercred
 
-[travis-img]: https://travis-ci.org/tep/net-peercred.svg?branch=master
-[travis]: https://travis-ci.org/tep/net-peercred
+[travis-img]: https://travis-ci.org/toolmanorg/net-peercred.svg?branch=master
+[travis]: https://travis-ci.org/toolmanorg/net-peercred
 
