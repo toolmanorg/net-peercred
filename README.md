@@ -128,10 +128,10 @@ cannot be extracted, AcceptPeerCred returns nil and an error.
 
 
 [mit-img]: http://img.shields.io/badge/License-MIT-c41e3a.svg
-[mit]: https://github.com/tep/net-peercred/blob/master/LICENSE
+[mit]: https://github.com/toolmanorg/net-peercred/blob/master/LICENSE
 
-[release-img]: https://img.shields.io/github/release/tep/net-peercred/all.svg
-[release]: https://github.com/tep/net-peercred/releases
+[release-img]: https://img.shields.io/github/release/toolmanorg/net-peercred/all.svg
+[release]: https://github.com/toolmanorg/net-peercred/releases
 
 [godoc-img]: https://godoc.org/toolman.org/net/peercred?status.svg
 [godoc]: https://godoc.org/toolman.org/net/peercred
