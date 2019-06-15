@@ -24,7 +24,7 @@ gRPC server over a Unix domain socket:
 
 	    // As with a simple unix-domain socket server, we'll first create
 	    // a new peercred.Listener listening on socketName
-	    lsnr, err := peercred.NewListener(ctx, socketName)
+	    lsnr, err := peercred.Listen(ctx, socketName)
 	    if err != nil {
 	        return err
 	    }
