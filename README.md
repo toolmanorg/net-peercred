@@ -54,7 +54,7 @@ A simple, unix-domain server can be written similar to the following:
 * [Constants](#pkg-constants)
 * [type Conn](#Conn)
 * [type Listener](#Listener)
-  * [func Listen(ctx context.Context, addr string) (*Listener, error)](#NewListener)
+  * [func Listen(ctx context.Context, addr string) (*Listener, error)](#Listen)
   * [func (pcl *Listener) Accept() (net.Conn, error)](#Listener.Accept)
   * [func (pcl *Listener) AcceptPeerCred() (*Conn, error)](#Listener.AcceptPeerCred)
 
@@ -97,11 +97,11 @@ the *Conn returned by AcceptPeerCred or Accept (after a type
 assertion).
 
 
-### <a name="NewListener">func</a> [NewListener](/src/target/listener.go?s=3047:3116#L76)
+### <a name="Listen">func</a> [Listen](/src/target/listener.go?s=3047:3116#L76)
 ``` go
-func NewListener(ctx context.Context, addr string) (*Listener, error)
+func Listen(ctx context.Context, addr string) (*Listener, error)
 ```
-NewListener returns a new Listener listening on the Unix domain socket addr.
+Listen returns a new Listener listening on the Unix domain socket addr.
 
 
 ### <a name="Listener.Accept">func</a> (\*Listener) [Accept](/src/target/listener.go?s=3657:3712#L93)
