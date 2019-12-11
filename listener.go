@@ -1,3 +1,4 @@
+// -----------------------------------------------------------------------------
 // Copyright 2019 Timothy E. Peoples
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -17,6 +18,7 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
+// -----------------------------------------------------------------------------
 
 // Package peercred provides Listener - a net.Listener implementation leveraging
 // the Linux SO_PEERCRED socket option to acquire the PID, UID, and GID of the
@@ -57,8 +59,13 @@ package peercred // import "toolman.org/net/peercred"
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net"
 	"os"
+	"strconv"
+	"strings"
+	"sync"
 
 	"golang.org/x/sys/unix"
 )
@@ -74,6 +81,7 @@ const ErrAddrInUse = unix.EADDRINUSE
 // acquired peer credentials are made available through the "Ucred" member of
 // the *Conn returned by AcceptPeerCred.
 type Listener struct {
+	once sync.Once
 	net.Listener
 }
 
@@ -85,17 +93,66 @@ func Listen(ctx context.Context, addr string) (*Listener, error) {
 		return nil, chkAddrInUseError(err)
 	}
 
-	return &Listener{l}, nil
+	return &Listener{Listener: l}, nil
+}
+
+// SDListen returns a new *Listener for systemd activated sockets.
+func SDListen() (*Listener, error) {
+	lpid, lfds := os.Getenv("LISTEN_PID"), os.Getenv("LISTEN_FDS")
+	if lpid == "" || lfds == "" {
+		return nil, errors.New("systemd socket not found")
+	}
+
+	pid := os.Getpid()
+
+	if i, err := strconv.Atoi(lpid); err != nil || i != pid {
+		if err == nil {
+			err = fmt.Errorf("systemd socket pid mismatch: got %d; wanted %d", i, pid)
+		}
+		return nil, err
+	}
+
+	if i, err := strconv.Atoi(lfds); err != nil || i != 1 {
+		if err == nil {
+			err = fmt.Errorf("systemd socket count mismatch: got %d; wanted 1", i)
+		}
+		return nil, err
+	}
+
+	name := "systemd:socket"
+	if lfdn := os.Getenv("LISTEN_FDNAMES"); lfdn != "" {
+		names := strings.Split(lfdn, ":")
+		name = names[0]
+	}
+
+	l, err := net.FileListener(os.NewFile(uintptr(3), name))
+	if err != nil {
+		return nil, err
+	}
+
+	return &Listener{Listener: l}, nil
+}
+
+// Close is a wrapper that calls the underlying net.Listener's Close method
+// once and only once regardless how many times this method is called.
+//
+// Close contributes to implementing the net.Listener interface.
+func (pcl *Listener) Close() error {
+	var err error
+	pcl.once.Do(func() {
+		err = pcl.Listener.Close()
+	})
+	return err
 }
 
 // Accept is a convenience wrapper around AcceptPeerCred allowing callers
-// that utilize net.Listener to function as expected. The returned net.Conn
-// is a *peercred.Conn that may be accessed with a type assertion. See
-// AcceptPeerCred for details on possible error conditions.
+// utilizing the net.Listener interface to function as expected. The returned
+// net.Conn is a *peercred.Conn that may be accessed with a type assertion.
+// See AcceptPeerCred for details on possible error conditions.
 //
 // Accept contributes to implementing the  net.Listener interface.
 func (pcl *Listener) Accept() (net.Conn, error) {
-	switch conn, err := pcl.AcceptPeerCred(); err {
+	switch conn, err := pcl.accept(context.Background()); err {
 	case nil:
 		return conn, nil
 	default:
@@ -103,13 +160,42 @@ func (pcl *Listener) Accept() (net.Conn, error) {
 	}
 }
 
-// AcceptPeerCred accepts a connection on the listening socket returning
-// a *peercred.Conn containing the process credentials for the client. If
-// the underlying Accept fails or if peer process credentials cannot be
-// extracted, AcceptPeerCred returns nil and an error.
+// AcceptPeerCred accepts a connection on the listening socket returning a *Conn
+// containing the process credentials for the client. If the underlying Accept
+// fails or if no peer process credentials can be extracted, AcceptPeerCred
+// returns nil and an error.
 func (pcl *Listener) AcceptPeerCred() (*Conn, error) {
+	return pcl.accept(context.Background())
+}
+
+// AcceptContext behaves the same as AcceptPeerCred except it immediately
+// returns nil and ctx.Err() if the Context is canceled. Note that the
+// underlying Accept call is unblocked by closing the listening socket so,
+// if this method is interrupted by a canceled Context, this *Listener will
+// accept no new connections.
+func (pcl *Listener) AcceptContext(ctx context.Context) (*Conn, error) {
+	return pcl.accept(ctx)
+}
+
+func (pcl *Listener) accept(ctx context.Context) (*Conn, error) {
+	done := make(chan struct{})
+	defer close(done)
+
+	// A goroutine to close the listener if ctx gets cancelled.
+	go func() {
+		select {
+		case <-done:
+		case <-ctx.Done():
+			pcl.Close()
+		}
+	}()
+
 	conn, err := pcl.Listener.Accept()
 	if err != nil {
+		if ctx.Err() != nil {
+			err = ctx.Err()
+		}
+
 		return nil, err
 	}
 
@@ -149,25 +235,17 @@ type Conn struct {
 	net.Conn
 }
 
+func asErrno(err error) unix.Errno {
+	p := new(unix.Errno)
+	if errors.As(err, p) {
+		return *p
+	}
+	return 0
+}
+
 func chkAddrInUseError(err error) error {
-	operr, ok := err.(*net.OpError)
-	if !ok {
-		return err
+	if errno := asErrno(err); errno == ErrAddrInUse {
+		return errno
 	}
-
-	syserr, ok := operr.Err.(*os.SyscallError)
-	if !ok {
-		return err
-	}
-
-	errno, ok := syserr.Err.(unix.Errno)
-	if !ok {
-		return err
-	}
-
-	if errno != ErrAddrInUse {
-		return err
-	}
-
-	return errno
+	return err
 }
