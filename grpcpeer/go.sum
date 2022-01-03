@@ -29,3 +29,5 @@ google.golang.org/grpc v1.21.0/go.mod h1:oYelfM1adQP15Ek0mdvEgi9Df8B9CZIaU1084ij
 honnef.co/go/tools v0.0.0-20190102054323-c2f93a96b099/go.mod h1:rf3lG4BRIbNafJWhAfAdb/ePZxsR/4RtNHQocxwk9r4=
 toolman.org/net/peercred v0.4.0 h1:738JhiU3ww87QSVEDQrOvCzAeA83ZB5YDG6Sh9xlg5g=
 toolman.org/net/peercred v0.4.0/go.mod h1:SMZOmKTHnSeUXekeQzo3MbKxU4999iT/eMy5luR5uAI=
+toolman.org/net/peercred v0.5.0 h1:al7yldsxY7ZyOGqax9blm2yKF1qi9fGTUPeosCpmrWM=
+toolman.org/net/peercred v0.5.0/go.mod h1:Tbt2mE3MzAanfqsJcWQNDWbhqvX7GqLi3JnfPXJ2z7k=

@@ -52,7 +52,7 @@
 //
 //      func (s *svcImpl) SomeMethod(ctx context.Context, req *SomeRequest, opts ...grpc.CallOption) (*SomeResponse, error) {
 //          creds, err := grpcpeer.FromContext(ctx)
-//          // (Unless there's an error) creds now holds a *unix.Ucred
+//          // (Unless there's an error) 'creds' now holds a *unix.Ucred
 //          // containing the PID, UID and GID of the calling client process.
 //      }
 //
@@ -60,6 +60,7 @@ package grpcpeer
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"net"
 
@@ -90,22 +91,70 @@ func TransportCredentials() grpc.ServerOption {
 	return grpc.Creds(&peerCredentials{})
 }
 
-// peerCredentials implements the gRPC TransportCredentials interface.
-type peerCredentials struct{}
+// TLSTransportCredentials is similar to TransportCredentials except that
+// accepts a *tls.Config for use by the gRPC server.
+func TLSTransportCredentials(cfg *tls.Config) grpc.ServerOption {
+	return grpc.Creds(&peerCredentials{credentials.NewTLS(cfg)})
+}
 
-func (pc *peerCredentials) ClientHandshake(context.Context, string, net.Conn) (net.Conn, credentials.AuthInfo, error) {
+// TLSClientCredentials returns a grpc.DialOption which uses the provided
+// *tls.Config as the client's certificate when dialing a similarly configured
+// gRPC server.
+func TLSClientCredentials(cfg *tls.Config) grpc.DialOption {
+	if cfg == nil {
+		cfg = new(tls.Config)
+	}
+
+	return grpc.WithTransportCredentials(&peerCredentials{credentials.NewTLS(cfg)})
+}
+
+// peerCredentials implements the gRPC TransportCredentials interface.
+type peerCredentials struct {
+	tcreds credentials.TransportCredentials
+}
+
+// ClientHandshake contributes to the implementation of the TransportCredentials
+// interface from package google.golang.org/grpc/credentials.
+func (pc *peerCredentials) ClientHandshake(ctx context.Context, authority string, conn net.Conn) (net.Conn, credentials.AuthInfo, error) {
+	if pc != nil && pc.tcreds != nil {
+		return pc.tcreds.ClientHandshake(ctx, authority, conn)
+	}
 	return nil, nil, errNotImplemented
 }
 
+// ServerHandshake contributes to the implementation of the TransportCredentials
+// interface from package google.golang.org/grpc/credentials.
 func (pc *peerCredentials) ServerHandshake(conn net.Conn) (net.Conn, credentials.AuthInfo, error) {
-	var info credentials.AuthInfo
+	ci := new(credInfo)
+	// First, capture Ucred from conn (if possible)
 	if pcConn, ok := conn.(*peercred.Conn); ok {
-		info = (*ucred)(pcConn.Ucred)
+		ci.ucred = pcConn.Ucred
 	}
-	return conn, info, nil
+
+	// If we have no underlying TransportCredentials, we're done.
+	if pc.tcreds == nil {
+		return conn, ci, nil
+	}
+
+	// Now, call the real ServerHandshake...
+	tlsConn, info, err := pc.tcreds.ServerHandshake(conn)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// ...and merge the results.
+	ci.AuthInfo = info
+
+	return tlsConn, ci, nil
 }
 
-func (*peerCredentials) Info() credentials.ProtocolInfo {
+// Info contributes to the implementation of the TransportCredentials interface
+// from package google.golang.org/grpc/credentials.
+func (pc *peerCredentials) Info() credentials.ProtocolInfo {
+	if pc.tcreds != nil {
+		return pc.tcreds.Info()
+	}
+
 	// NOTE: There's little to no documentation on what this struct
 	//       should contain but, after a hasty perusal of the code,
 	//       it appears that setting SecurityProtocol to a value
@@ -116,23 +165,46 @@ func (*peerCredentials) Info() credentials.ProtocolInfo {
 	}
 }
 
+// Clone contributes to the implementation of the TransportCredentials interface
+// from package google.golang.org/grpc/credentials.
 func (pc *peerCredentials) Clone() credentials.TransportCredentials {
 	c := *pc
 	return &c
 }
 
-func (*peerCredentials) OverrideServerName(string) error { return nil }
+// OverrideServerName contributes to the implementation of the TransportCredentials
+// interface from package google.golang.org/grpc/credentials.
+func (pc *peerCredentials) OverrideServerName(s string) error {
+	if pc == nil || pc.tcreds == nil {
+		return nil
+	}
 
-// ucred is a wrapper around the Ucred struct from golang.org/x/sys/unix
+	return pc.tcreds.OverrideServerName(s)
+}
+
+// credInfo is a wrapper around the Ucred struct from golang.org/x/sys/unix
 // allowing it to be used as the AuthInfo member of a gRPC peer.
 //
 // This is part of the mechanism used for plumbing *Ucred values through
 // the gRPC framework and is not intended for general use.
-type ucred unix.Ucred
+type credInfo struct {
+	ucred *unix.Ucred
+	credentials.AuthInfo
+}
 
 // AuthType implements the grpc/credentials AuthInfo interface to enable
-// plumbing *Ucred values through the gRPC framework.
-func (*ucred) AuthType() string { return "PeerCred" }
+// plumbing *unix.Ucred values through the gRPC framework.
+func (ci *credInfo) AuthType() string {
+	if ci == nil {
+		return ""
+	}
+
+	if ci.AuthInfo == nil {
+		return "PeerCred"
+	}
+
+	return ci.AuthInfo.AuthType()
+}
 
 // FromContext extracts peer process credentials, if any, from the given
 // Context. This is only possible if the gRPC server was creating with the
@@ -147,10 +219,9 @@ func FromContext(ctx context.Context) (*unix.Ucred, error) {
 		return nil, ErrNoPeer
 	}
 
-	c, ok := p.AuthInfo.(*ucred)
-	if !ok {
-		return nil, ErrNoCredentials
+	if ci, ok := p.AuthInfo.(*credInfo); ok {
+		return ci.ucred, nil
 	}
 
-	return (*unix.Ucred)(c), nil
+	return nil, ErrNoCredentials
 }
