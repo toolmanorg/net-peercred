@@ -24,9 +24,9 @@
 // the Linux SO_PEERCRED socket option to acquire the PID, UID, and GID of the
 // foreign process connected to each socket. According to the socket(7) manual,
 //
-//     This is possible only for connected AF_UNIX stream
-//     sockets and AF_UNIX stream and datagram socket pairs
-//     created using socketpair(2).
+//	This is possible only for connected AF_UNIX stream
+//	sockets and AF_UNIX stream and datagram socket pairs
+//	created using socketpair(2).
 //
 // Therefore, peercred.Listener only supports Unix domain sockets and IP
 // connections are not available.
@@ -39,32 +39,29 @@
 //
 // A simple, unix-domain server can be written similar to the following:
 //
-//      // Create a new Listener listening on socketName
-//      lsnr, err := peercred.Listen(ctx, socketName)
-//      if err != nil {
-//          return err
-//      }
+//	// Create a new Listener listening on socketName
+//	lsnr, err := peercred.Listen(ctx, socketName)
+//	if err != nil {
+//	    return err
+//	}
 //
-//      // Wait for and accept an incoming connection
-//      conn, err := lsnr.AcceptPeerCred()
-//      if err != nil {
-//          return err
-//      }
+//	// Wait for and accept an incoming connection
+//	conn, err := lsnr.AcceptPeerCred()
+//	if err != nil {
+//	    return err
+//	}
 //
-//      // conn.Ucred has fields Pid, Uid and Gid
-//      fmt.Printf("Client PID=%d UID=%d\n", conn.Ucred.Pid, conn.Ucred.Uid)
+//	// conn.Ucred has fields Pid, Uid and Gid
+//	fmt.Printf("Client PID=%d UID=%d\n", conn.Ucred.Pid, conn.Ucred.Uid)
 //
-//
+// NOTE: Currently, this package only works on Linux.
+// MacOS and FreeBSD are on the todo list. Windows isn't (nor are other OSs).
 package peercred // import "toolman.org/net/peercred"
 
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net"
-	"os"
-	"strconv"
-	"strings"
 	"sync"
 
 	"golang.org/x/sys/unix"
@@ -80,6 +77,8 @@ const ErrAddrInUse = unix.EADDRINUSE
 // sockets, no "network" argument is required here ("unix" is implied). The
 // acquired peer credentials are made available through the "Ucred" member of
 // the *Conn returned by AcceptPeerCred.
+//
+// See 'SO_PEERCRED' in socket(7) for further details.
 type Listener struct {
 	once sync.Once
 	net.Listener
@@ -91,43 +90,6 @@ func Listen(ctx context.Context, addr string) (*Listener, error) {
 	l, err := lc.Listen(ctx, "unix", addr)
 	if err != nil {
 		return nil, chkAddrInUseError(err)
-	}
-
-	return &Listener{Listener: l}, nil
-}
-
-// SDListen returns a new *Listener for systemd activated sockets.
-func SDListen() (*Listener, error) {
-	lpid, lfds := os.Getenv("LISTEN_PID"), os.Getenv("LISTEN_FDS")
-	if lpid == "" || lfds == "" {
-		return nil, errors.New("systemd socket not found")
-	}
-
-	pid := os.Getpid()
-
-	if i, err := strconv.Atoi(lpid); err != nil || i != pid {
-		if err == nil {
-			err = fmt.Errorf("systemd socket pid mismatch: got %d; wanted %d", i, pid)
-		}
-		return nil, err
-	}
-
-	if i, err := strconv.Atoi(lfds); err != nil || i != 1 {
-		if err == nil {
-			err = fmt.Errorf("systemd socket count mismatch: got %d; wanted 1", i)
-		}
-		return nil, err
-	}
-
-	name := "systemd:socket"
-	if lfdn := os.Getenv("LISTEN_FDNAMES"); lfdn != "" {
-		names := strings.Split(lfdn, ":")
-		name = names[0]
-	}
-
-	l, err := net.FileListener(os.NewFile(uintptr(3), name))
-	if err != nil {
-		return nil, err
 	}
 
 	return &Listener{Listener: l}, nil
@@ -165,7 +127,7 @@ func (pcl *Listener) Accept() (net.Conn, error) {
 // fails or if no peer process credentials can be extracted, AcceptPeerCred
 // returns nil and an error.
 func (pcl *Listener) AcceptPeerCred() (*Conn, error) {
-	return pcl.accept(context.Background())
+	return pcl.accept(nil)
 }
 
 // AcceptContext behaves the same as AcceptPeerCred except it immediately
@@ -178,17 +140,23 @@ func (pcl *Listener) AcceptContext(ctx context.Context) (*Conn, error) {
 }
 
 func (pcl *Listener) accept(ctx context.Context) (*Conn, error) {
-	done := make(chan struct{})
-	defer close(done)
+	if ctx != nil {
+		// n.b. AcceptPeerCred calls this method with a nil Context so we should
+		//      only do this stuff if ctx has a value.
+		done := make(chan struct{})
+		defer close(done)
 
-	// A goroutine to close the listener if ctx gets cancelled.
-	go func() {
-		select {
-		case <-done:
-		case <-ctx.Done():
-			pcl.Close()
-		}
-	}()
+		// A goroutine to close the listener if ctx gets cancelled before this
+		// method returns (which closes the local 'done' channel via the above
+		// 'defer'.
+		go func() {
+			select {
+			case <-done:
+			case <-ctx.Done():
+				pcl.Close()
+			}
+		}()
+	}
 
 	conn, err := pcl.Listener.Accept()
 	if err != nil {
